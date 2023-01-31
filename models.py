@@ -50,7 +50,7 @@ class Q(nn.Module):
         self.gamma = gamma
         self.bert_tokenizer = BertTokenizerFast.from_pretrained(bert_name) if bert_tokenizer is None else bert_tokenizer
         self.bert = AutoModel.from_pretrained(bert_name) if bert is None else copy.deepcopy(bert)
-        self.gpt_tokenizer = BertTokenizer(vocab_file = os.path.join(pwd, 'GPT-2/vocab_small.txt')) if gpt_tokenizer is None else gpt_tokenizer
+        self.gpt_tokenizer = BertTokenizer(vocab_file = os.path.join('.', 'GPT-2/vocab_small.txt')) if gpt_tokenizer is None else gpt_tokenizer
         self.only_down_stream = only_down_stream
         if only_down_stream:
            self.bert.eval()
@@ -109,8 +109,8 @@ class Q(nn.Module):
 class GPT2Wrapper(nn.Module):
     def __init__(self, gpt = None, tokenizer = None, device = 'cpu'):
         super(GPT2Wrapper, self).__init__()
-        self.gpt = gpt if gpt is not None else GPT2LMHeadModel.from_pretrained(os.path.join(pwd, './GPT-2/GPT2_finetune_1'))
-        self.tokenizer = BertTokenizer(vocab_file = os.path.join(pwd, 'GPT-2/vocab_small.txt')) if tokenizer is None else tokenizer
+        self.gpt = gpt if gpt is not None else GPT2LMHeadModel.from_pretrained(os.path.join('.', './GPT-2/GPT2_finetune_1'))
+        self.tokenizer = BertTokenizer(vocab_file = os.path.join('.', 'GPT-2/vocab_small.txt')) if tokenizer is None else tokenizer
         self.vocab_size = self.tokenizer.vocab_size
         self.special_tokens = {}
         for idx, key in enumerate(self.tokenizer.all_special_tokens):
@@ -139,7 +139,6 @@ class GPT2Wrapper(nn.Module):
         '''
             prev_utterance = [seq_length_prev_utterance]
             response = [seq_length_response]
-            if response is None, mask and utter_length must not be None, which means they have been processed, i.e. use the output of this function to generate next response
         '''
         eos_token = self.special_tokens[eos_word]
         # prev_utterance = prev_utterance if response is None else [torch.cat((utt, res)) for utt, res in zip(prev_utterance, response)]
@@ -162,6 +161,8 @@ class GPT2Wrapper(nn.Module):
                         utter_length[idx] = min(len(prev_utterance[idx]), max_len)            
                     else:
                         length = len(utt[utt > 0])
+                        if length == len(utt):
+                            prev_utterance[idx] = torch.cat((prev_utterance[idx], torch.zeros(10, device = self.device)))
                         if 138 not in utt[length - 5:] and 140 not in utt[length - 5:]:
                             start = length - 1 if utt[length - 1] == eos_token else length
                             prev_utterance[idx][start: start + 5] = self.tokenizer.encode('[' + emotion[random.randint(0, len(emotion) - 1)] + ']', return_tensors = 'pt')[0][1:]
