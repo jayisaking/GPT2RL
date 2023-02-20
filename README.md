@@ -1,4 +1,6 @@
 # GPT2RL
+## Intro
+This repo contains training and testing code of a conversation model.
 ## Models Download Link
 
 | Model Name | URL |
