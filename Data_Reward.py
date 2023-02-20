@@ -11,28 +11,47 @@ import random
 import numpy as np
 
 class GPT2DataSet(Dataset):
-    def __init__(self, tokenizer = None, max_len = 256, root_path = './', train_path = 'single_emo_T_train.json', val_path = 'single_emo_T_valid.json', test_path = 'single_emo_T_test.json', status = 'train', dataset_root_path = 'dataset', 
-                 shuffle = True) -> None:
+    def __init__(self, tokenizer = None, max_len = 256, root_path = './', train_path = 'single_emo_T_train.json', val_path = 'single_emo_T_valid.json', test_path = 'single_emo_T_test.json', status = 'train', 
+                 dataset_root_path = 'dataset', shuffle = True, length_lower_bound = 30, length_upper_bound = 180, seperate_word = ['，', '。', '？', '！', '、', '[', ']', '（', '）', '～']) -> None:
         self.file_path = os.path.join(root_path, dataset_root_path, (train_path if 'train' in status else (val_path if 'val' in status else test_path)))
         with open(self.file_path) as f:
             self.data = json.load(f)
         self.dataset = []
-        self.tokenizer = BertTokenizer(vocab_file = os.path.join(root_path, 'GPT-2/vocab_small.txt')) if tokenizer is None else tokenizer
+        self.tokenizer = BertTokenizer.from_pretrained('bert-base-chinese') if tokenizer is None else tokenizer
         if  status == 'test':
             self.data = [i[0] + i[1] for i in self.data]
         self.max_len = max_len
-        for line in self.data:
-            if '[' not in line or ']' not in line or line.count(']') != 1 or line.count('[') != 1:
+        temp_max_len = 0
+        for idx, line in enumerate(self.data):
+            if '[' not in line or ']' not in line or line.count(']') != 1 or line.count('[') != 1 or '哈' in line or '我也是' in line or '嗯' in line :
                 continue
             else:
-                self.max_len = max(self.max_len, len(line))
-                self.dataset.append(line)
+                ptr = 0
+                while line[ptr] != ']':
+                    ptr += 1
+                counter = ptr + 1
+                while counter < len(line) and line[counter] not in seperate_word:
+                    counter += 1
+                if counter - ptr <= 5:
+                    continue
+                temp_max_len = max(temp_max_len, len(line))
+                if len(line) <= length_lower_bound or len(line) >= length_upper_bound:
+                    continue
+                if idx % 100000 == 0:
+                    print("Dataset processing to...", idx)
+                
+                res = self.tokenizer.encode(line, return_tensors = 'pt')[0]
+                self.dataset.append(res)
         if shuffle:
             random.shuffle(self.dataset)
+        print(status, "Dataset Max Length : ", temp_max_len)
+        print(status, "Dataset size : ", len(self.dataset))
     def __len__(self) -> int:
         return len(self.dataset)
     def __getitem__(self, index) -> dict:
-        return Reward.sentence2id(self.dataset[index], self.tokenizer, max_len = self.max_len)
+        return self.dataset[index]
+    def shuffle(self):
+        random.shuffle(self.dataset)
     @staticmethod
     def get_toxic_ids_and_non_sense_response(tokenizer, 
                                          dirty_words = ['幹!','賤貨','米蟲','王八','王八蛋','不要臉','吃屎','敗類','智障','白癡','賤人','下流',
@@ -52,9 +71,10 @@ class GPT2DataSet(Dataset):
         return toxic_ids, non_sense_ids
     
 class Reward(nn.Module):
-    def __init__(self, gpt : GPT2LMHeadModel, question_mark_token, toxic_words : list, non_sense_response : list, eos_token = 0, device = "cpu", gpt_tokenizer = None, bos_token = 101, root_path = './dataset') -> None:
+    def __init__(self, gpt : GPT2LMHeadModel, question_mark_token, toxic_words : list, non_sense_response : list, eos_token = 0, device = "cpu", gpt_tokenizer = None, bos_token = 101, root_path = './dataset',
+                 length_word_weight = 0.1, question_reward_weight = 0.1, coherence_weight = 0.1, toxicity_weight = 0.1, ease_of_answering_weight = 0.1, get_reward_semantic_coherence_weight = 0.1) -> None:
         super(Reward, self).__init__()
-        self.reward_coefficient = torch.ones(6, device = device) / 6
+        self.reward_coefficient = torch.tensor([length_word_weight, question_reward_weight, coherence_weight, toxicity_weight, ease_of_answering_weight, get_reward_semantic_coherence_weight], device = device)
         self.gpt = copy.deepcopy(gpt)
         self.gpt = self.gpt.to(device)
         self.gpt_tokenizer = BertTokenizer(vocab_file = os.path.join(root_path, 'GPT-2/vocab_small.txt')) if gpt_tokenizer is None else gpt_tokenizer
